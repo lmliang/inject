@@ -7,7 +7,12 @@ import (
 	"time"
 )
 
+type Detail struct {
+	Addr string
+}
+
 type testStruct struct {
+	Detail
 	Field string
 	Name  string
 	Prod  int
@@ -51,7 +56,7 @@ func Test_Invoke(t *testing.T) {
 }
 
 func Test_AssignField(t *testing.T) {
-	st := &testStruct{"china", "beijing", 100, 500, time.Now()}
+	st := &testStruct{Detail{}, "china", "beijing", 100, 500, time.Now()}
 
 	inj := inject.New()
 
@@ -65,18 +70,20 @@ func Test_AssignField(t *testing.T) {
 
 	inj.AssignField(st)
 
-	if st.Field != "US" || st.Name != "Huston" || st.Prod != 300 || st.Total != 4500 || st.Tm != tm {
+	if st.Addr != "" || st.Field != "US" || st.Name != "Huston" || st.Prod != 300 || st.Total != 4500 || st.Tm != tm {
 		t.Errorf("Test_AssignField:[1] failed")
 	}
 
+	addr := Detail{"Time"}
 	tm = time.Now().Add(time.Hour * 2)
 	inj.SetTag("Name", reflect.TypeOf("New York"), reflect.ValueOf("New York"))
 	inj.SetTag("Total", reflect.TypeOf(2000), reflect.ValueOf(2000))
 	inj.SetTag("Tm", reflect.TypeOf(tm), reflect.ValueOf(tm))
+	inj.SetTag("Detail", reflect.TypeOf(addr), reflect.ValueOf(addr))
 
 	inj.AssignField(st)
 
-	if st.Field != "US" || st.Name != "New York" || st.Prod != 300 || st.Total != 2000 || st.Tm != tm {
+	if st.Addr != "Time" || st.Field != "US" || st.Name != "New York" || st.Prod != 300 || st.Total != 2000 || st.Tm != tm {
 		t.Errorf("Test_AssignField:[2] failed")
 	}
 }
