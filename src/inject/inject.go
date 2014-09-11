@@ -1,14 +1,14 @@
 package inject
 
 import (
-	//"fmt"
+	"fmt"
 	"reflect"
 	"strconv"
 )
 
 // 函数调用
 type Invoke interface {
-	// 调用函数，以reflect.Value方式返回参数及错误信息
+	// 调用函数，以reflect.Value方式返回参数及错误信息，如果参数不是函数则panic
 	Invoke(interface{}) ([]reflect.Value, error)
 }
 
@@ -20,35 +20,37 @@ type Assign interface {
 
 // 按照index进行Type映射
 type TypeIndexMapper interface {
-	MapIndex(interface{}, int) TypeIndexMapper
+	MapIndex(int, interface{}) TypeIndexMapper
 
-	MapIndexTo(interface{}, interface{}, int) TypeIndexMapper
+	MapIndexTo(int, interface{}, interface{}) TypeIndexMapper
 
-	SetIndex(reflect.Type, reflect.Value, int) TypeIndexMapper
+	SetIndex(int, reflect.Type, reflect.Value) TypeIndexMapper
 
-	GetIndex(reflect.Type, int) reflect.Value
+	GetIndex(int, reflect.Type) reflect.Value
 }
 
 // 按照tag进行Type映射
 type TypeTagMapper interface {
-	MapTag(interface{}, string) TypeTagMapper
+	MapTag(string, interface{}) TypeTagMapper
 
-	MapTagTo(interface{}, interface{}, string) TypeTagMapper
+	MapTagTo(string, interface{}, interface{}) TypeTagMapper
 
-	SetTag(reflect.Type, reflect.Value, string) TypeTagMapper
+	SetTag(string, reflect.Type, reflect.Value) TypeTagMapper
 
-	GetTag(reflect.Type, string) reflect.Value
+	GetTag(string, reflect.Type) reflect.Value
 }
 
 type TypeMapper interface {
 	TypeIndexMapper
-	//TypeTagMapper
+	TypeTagMapper
 }
 
 type Injector interface {
 	Invoke
 	Assign
 	TypeMapper
+
+	SetParent(Injector)
 }
 
 // 获得指向interface指针的类型
@@ -67,11 +69,62 @@ func InterfaceOfPtr(i interface{}) reflect.Type {
 }
 
 type injector struct {
+	// 按照reflect.Type类型为键，值按照标签存储
+	// 函数多参数类型相同时，标签为参数序号；
+	// 结构体字段赋值时标签为字段名称（必须为可导出字段）
 	values map[reflect.Type]map[string]reflect.Value
 	parent Injector
 }
 
-func (i *injector) MapIndex(value interface{}, index int) TypeIndexMapper {
+func (i *injector) Invoke(fn interface{}) ([]reflect.Value, error) {
+	t := reflect.TypeOf(fn)
+
+	in := make([]reflect.Value, t.NumIn())
+
+	for n := 0; n < t.NumIn(); n++ {
+		tp := t.In(n)
+		arg := i.GetIndex(n, tp)
+		if !arg.IsValid() {
+			return nil, fmt.Errorf("Inject-Invoke: call func %s not found param(%d) type %#v", t.Name(), n, tp.Name())
+		}
+		in[n] = arg
+	}
+
+	return reflect.ValueOf(fn).Call(in), nil
+}
+
+func (i *injector) AssignField(st interface{}) error {
+	v := reflect.ValueOf(st)
+
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	if v.Kind() != reflect.Struct {
+		return fmt.Errorf("Inject-AssignField: expect a struct param.")
+	}
+
+	t := v.Type()
+
+	for n := 0; n < t.NumField(); n++ {
+		f := v.Field(n)
+		sf := t.Field(n)
+
+		ft := f.Type()
+		val := i.GetTag(sf.Name, ft)
+		if val.IsValid() {
+			f.Set(val)
+		}
+	}
+
+	return nil
+}
+
+func (i *injector) SetParent(parent Injector) {
+	i.parent = parent
+}
+
+func (i *injector) MapIndex(index int, value interface{}) TypeIndexMapper {
 	t := reflect.TypeOf(value)
 
 	m, ok := i.values[t]
@@ -87,7 +140,7 @@ func (i *injector) MapIndex(value interface{}, index int) TypeIndexMapper {
 	return i
 }
 
-func (i *injector) MapIndexTo(value interface{}, interfacePtr interface{}, index int) TypeIndexMapper {
+func (i *injector) MapIndexTo(index int, value interface{}, interfacePtr interface{}) TypeIndexMapper {
 	t := InterfaceOfPtr(interfacePtr)
 
 	m, ok := i.values[t]
@@ -102,7 +155,7 @@ func (i *injector) MapIndexTo(value interface{}, interfacePtr interface{}, index
 	return i
 }
 
-func (i *injector) SetIndex(t reflect.Type, v reflect.Value, index int) TypeIndexMapper {
+func (i *injector) SetIndex(index int, t reflect.Type, v reflect.Value) TypeIndexMapper {
 	m, ok := i.values[t]
 	if !ok {
 		m = make(map[string]reflect.Value)
@@ -115,7 +168,7 @@ func (i *injector) SetIndex(t reflect.Type, v reflect.Value, index int) TypeInde
 	return i
 }
 
-func (i *injector) GetIndex(t reflect.Type, index int) reflect.Value {
+func (i *injector) GetIndex(index int, t reflect.Type) reflect.Value {
 	v := reflect.ValueOf(nil)
 
 	m, ok := i.values[t]
@@ -136,13 +189,13 @@ func (i *injector) GetIndex(t reflect.Type, index int) reflect.Value {
 	}
 
 	if !v.IsValid() && i.parent != nil {
-		v = i.parent.GetIndex(t, index)
+		v = i.parent.GetIndex(index, t)
 	}
 
 	return v
 }
 
-func (i *injector) MapTag(value interface{}, tag string) TypeIndexMapper {
+func (i *injector) MapTag(tag string, value interface{}) TypeTagMapper {
 	t := reflect.TypeOf(value)
 
 	m, ok := i.values[t]
@@ -157,7 +210,7 @@ func (i *injector) MapTag(value interface{}, tag string) TypeIndexMapper {
 	return i
 }
 
-func (i *injector) MapTagTo(value interface{}, interfacePtr interface{}, tag string) TypeIndexMapper {
+func (i *injector) MapTagTo(tag string, value interface{}, interfacePtr interface{}) TypeTagMapper {
 	t := InterfaceOfPtr(interfacePtr)
 
 	m, ok := i.values[t]
@@ -171,7 +224,7 @@ func (i *injector) MapTagTo(value interface{}, interfacePtr interface{}, tag str
 	return i
 }
 
-func (i *injector) SetTag(t reflect.Type, v reflect.Value, tag string) TypeIndexMapper {
+func (i *injector) SetTag(tag string, t reflect.Type, v reflect.Value) TypeTagMapper {
 	m, ok := i.values[t]
 	if !ok {
 		m = make(map[string]reflect.Value)
@@ -183,7 +236,7 @@ func (i *injector) SetTag(t reflect.Type, v reflect.Value, tag string) TypeIndex
 	return i
 }
 
-func (i *injector) GetTag(t reflect.Type, tag string) reflect.Value {
+func (i *injector) GetTag(tag string, t reflect.Type) reflect.Value {
 	v := reflect.ValueOf(nil)
 
 	m, ok := i.values[t]
@@ -203,8 +256,12 @@ func (i *injector) GetTag(t reflect.Type, tag string) reflect.Value {
 	}
 
 	if !v.IsValid() && i.parent != nil {
-		v = i.parent.GetTag(t, tag)
+		v = i.parent.GetTag(tag, t)
 	}
 
 	return v
+}
+
+func New() Injector {
+	return &injector{values: make(map[reflect.Type]map[string]reflect.Value)}
 }
