@@ -57,7 +57,7 @@ type Injector interface {
 func InterfaceOfPtr(i interface{}) reflect.Type {
 	t := reflect.TypeOf(i)
 
-	if t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 
