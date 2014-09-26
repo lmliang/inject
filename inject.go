@@ -96,7 +96,7 @@ func (i *injector) Invoke(fn interface{}) ([]reflect.Value, error) {
 func (i *injector) AssignField(st interface{}) error {
 	v := reflect.ValueOf(st)
 
-	if v.Kind() == reflect.Ptr {
+	for v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
 
