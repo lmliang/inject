@@ -111,7 +111,7 @@ func (i *injector) AssignField(st interface{}) error {
 		sf := t.Field(n)
 
 		val := i.GetTag(sf.Name, f.Type())
-		if val.IsValid() {
+		if val.IsValid() && val.CanSet(){
 			f.Set(val)
 		}
 	}
